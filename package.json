@@ -1,12 +1,12 @@
 {
   "name": "vzn-bot",
   "version": "1.0.0",
-  "description": "Bot Discord",
-  "main": "index.js",
+  "main": "vzn.js",
   "scripts": {
     "start": "node vzn.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.1"
+    "discord.js": "^14.14.1",
+    "express": "^4.21.2"
   }
 }
