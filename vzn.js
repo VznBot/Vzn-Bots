@@ -20,7 +20,7 @@ const client = new Client({
   ]
 });
 
-client.on("ready", () => {
+client.once("ready", () => {
   console.log(`Logado como ${client.user.tag}`);
 });
 
@@ -31,5 +31,16 @@ client.on("messageCreate", (message) => {
     message.reply("Bot ativo!");
   }
 });
+
+console.log("Tentando logar no Discord...");
+
+client.login(process.env.TOKEN)
+  .then(() => {
+    console.log("Login enviado com sucesso");
+  })
+  .catch((err) => {
+    console.error("ERRO AO LOGAR NO DISCORD:");
+    console.error(err);
+  });
 
 client.login(process.env.TOKEN);
