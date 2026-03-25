@@ -1,3 +1,5 @@
+require("dns").setDefaultResultOrder("ipv4first");
+
 const { Client, GatewayIntentBits, Events } = require("discord.js");
 const express = require("express");
 
@@ -26,7 +28,11 @@ console.log("TOKEN existe?", !!token);
 console.log("Tamanho do token:", token.length);
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 client.on("debug", (msg) => {
