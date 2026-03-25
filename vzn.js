@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const express = require("express");
 
+// ===== SERVIDOR WEB (necessário pro Render free) =====
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -12,6 +13,13 @@ app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
 
+// ===== TOKEN =====
+const token = (process.env.TOKEN || "").trim();
+
+console.log("TOKEN existe?", !!token);
+console.log("Tamanho do token:", token.length);
+
+// ===== BOT DISCORD =====
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -20,10 +28,12 @@ const client = new Client({
   ]
 });
 
+// Quando o bot ligar
 client.once("ready", () => {
   console.log(`Logado como ${client.user.tag}`);
 });
 
+// Comando de teste
 client.on("messageCreate", (message) => {
   if (message.author.bot) return;
 
@@ -32,9 +42,10 @@ client.on("messageCreate", (message) => {
   }
 });
 
+// ===== LOGIN =====
 console.log("Tentando logar no Discord...");
 
-client.login(process.env.TOKEN)
+client.login(token)
   .then(() => {
     console.log("Login enviado com sucesso");
   })
@@ -42,5 +53,3 @@ client.login(process.env.TOKEN)
     console.error("ERRO AO LOGAR NO DISCORD:");
     console.error(err);
   });
-
-client.login(process.env.TOKEN);
