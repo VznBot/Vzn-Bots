@@ -1,7 +1,14 @@
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, Events } = require("discord.js");
 const express = require("express");
 
-// ===== SERVIDOR WEB (necessário pro Render free) =====
+process.on("unhandledRejection", (error) => {
+  console.error("unhandledRejection:", error);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("uncaughtException:", error);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -13,27 +20,38 @@ app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
 
-// ===== TOKEN =====
 const token = (process.env.TOKEN || "").trim();
 
 console.log("TOKEN existe?", !!token);
 console.log("Tamanho do token:", token.length);
 
-// ===== BOT DISCORD =====
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
+  intents: [GatewayIntentBits.Guilds]
 });
 
-// Quando o bot ligar
-client.once("ready", () => {
-  console.log(`Logado como ${client.user.tag}`);
+client.on("debug", (msg) => {
+  if (
+    msg.includes("Preparing to connect") ||
+    msg.includes("Identifying") ||
+    msg.includes("Session Limit Information") ||
+    msg.includes("connected")
+  ) {
+    console.log("DEBUG:", msg);
+  }
 });
 
-// Comando de teste
+client.on("warn", (msg) => {
+  console.warn("WARN:", msg);
+});
+
+client.on("error", (err) => {
+  console.error("CLIENT ERROR:", err);
+});
+
+client.on(Events.ClientReady, (readyClient) => {
+  console.log(`Logado como ${readyClient.user.tag}`);
+});
+
 client.on("messageCreate", (message) => {
   if (message.author.bot) return;
 
@@ -42,14 +60,12 @@ client.on("messageCreate", (message) => {
   }
 });
 
-// ===== LOGIN =====
-console.log("Tentando logar no Discord...");
+console.log("Chamando client.login...");
 
 client.login(token)
   .then(() => {
-    console.log("Login enviado com sucesso");
+    console.log("client.login resolveu com sucesso");
   })
   .catch((err) => {
-    console.error("ERRO AO LOGAR NO DISCORD:");
-    console.error(err);
+    console.error("ERRO NO client.login:", err);
   });
