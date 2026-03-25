@@ -28,13 +28,13 @@ app.listen(PORT, () => {
 
 // ===== Configurações =====
 // Coloque aqui o ID da categoria onde os tickets serão criados
-const TICKET_CATEGORY_ID = "COLOQUE_AQUI_O_ID_DA_CATEGORIA";
+const TICKET_CATEGORY_ID = "1407113666029162498";
 
 // Cargo que pode ver/gerenciar tickets além do dono
-const STAFF_ROLE_ID = "COLOQUE_AQUI_O_ID_DO_CARGO_DA_EQUIPE";
+const STAFF_ROLE_ID = "1407113665546817612";
 
 // Canal onde você vai mandar o painel
-const PAINEL_CANAL_ID = "COLOQUE_AQUI_O_ID_DO_CANAL_DO_PAINEL";
+const PAINEL_CANAL_ID = "1407113666029162500";
 
 // Prefixo opcional para comando de enviar painel
 const PREFIX = "!";
