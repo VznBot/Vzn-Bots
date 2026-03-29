@@ -10,7 +10,8 @@ const {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
-  Events
+  Events,
+  MessageFlags
 } = require("discord.js");
 const express = require("express");
 
@@ -66,6 +67,38 @@ const sanitizeName = (name) =>
     .replace(/[^a-z0-9]/g, "-")
     .replace(/-+/g, "-")
     .slice(0, 20);
+
+const parseTopic = (topic = "") => {
+  const get = (key) => topic.match(new RegExp(`${key}:([^|]+)`))?.[1]?.trim();
+  return {
+    userId: get("user"),
+    tipo: get("tipo"),
+    status: get("status"),
+    produto: get("produto"),
+    preco: get("preco"),
+    pago: get("pago")
+  };
+};
+
+const buildTopic = ({
+  userId,
+  tipo,
+  status = "aberto",
+  produto,
+  preco,
+  pago = "nao"
+}) => {
+  const parts = [
+    `user:${userId}`,
+    `tipo:${tipo}`,
+    `status:${status}`,
+    produto ? `produto:${produto}` : null,
+    preco ? `preco:${preco}` : null,
+    `pago:${pago}`
+  ].filter(Boolean);
+
+  return parts.join(" | ");
+};
 
 const painelEmbed = () =>
   new EmbedBuilder()
@@ -167,16 +200,10 @@ const closedButtons = () =>
       .setEmoji("🗑️")
   );
 
-function parseTopic(topic = "") {
-  const get = (key) => topic.match(new RegExp(`${key}:([^|]+)`))?.[1]?.trim();
-  return {
-    userId: get("user"),
-    tipo: get("tipo"),
-    status: get("status"),
-    produto: get("produto"),
-    preco: get("preco"),
-    pago: get("pago")
-  };
+async function safeButtonAcknowledge(interaction) {
+  if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferUpdate().catch(() => {});
+  }
 }
 
 async function findOpenTicket(guild, userId, tipo) {
@@ -200,7 +227,7 @@ async function createTicket(interaction, tipo) {
   if (existing) {
     return interaction.reply({
       content: `Você já possui um ticket aberto: ${existing}`,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -208,7 +235,12 @@ async function createTicket(interaction, tipo) {
     name: `${config.prefixo}-${sanitizeName(user.username)}`,
     type: ChannelType.GuildText,
     parent: TICKET_CATEGORY_ID,
-    topic: `user:${user.id} | tipo:${tipo} | status:aberto | pago:nao`,
+    topic: buildTopic({
+      userId: user.id,
+      tipo,
+      status: "aberto",
+      pago: "nao"
+    }),
     permissionOverwrites: [
       {
         id: guild.roles.everyone.id,
@@ -269,7 +301,7 @@ async function createTicket(interaction, tipo) {
 
   await interaction.reply({
     content: `Seu ticket foi criado: ${channel}`,
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -278,8 +310,16 @@ async function sendOrderSummary(channel, user, tipo, productKey) {
   const product = products[productKey];
   const info = parseTopic(channel.topic || "");
 
-  const newTopic = `user:${info.userId} | tipo:${tipo} | status:${info.status || "aberto"} | produto:${product.label} | preco:${product.preco} | pago:${info.pago || "nao"}`;
-  await channel.setTopic(newTopic);
+  await channel.setTopic(
+    buildTopic({
+      userId: info.userId,
+      tipo,
+      status: info.status || "aberto",
+      produto: product.label,
+      preco: product.preco,
+      pago: info.pago || "nao"
+    })
+  );
 
   const embed = new EmbedBuilder()
     .setTitle("🧾 Resumo do Pedido")
@@ -306,7 +346,7 @@ async function sendOrderSummary(channel, user, tipo, productKey) {
 }
 
 async function markAsPaid(interaction) {
-  await interaction.deferUpdate();
+  await safeButtonAcknowledge(interaction);
 
   const embed = new EmbedBuilder()
     .setTitle("📨 Pagamento enviado")
@@ -326,11 +366,10 @@ async function markAsPaid(interaction) {
 }
 
 async function confirmPayment(interaction) {
-  await interaction.deferUpdate();
+  await safeButtonAcknowledge(interaction);
 
   const { channel, guild } = interaction;
-  const topic = channel.topic || "";
-  const info = parseTopic(topic);
+  const info = parseTopic(channel.topic || "");
 
   if (info.pago === "sim") {
     return channel.send({
@@ -343,12 +382,20 @@ async function confirmPayment(interaction) {
     });
   }
 
-  const newTopic = topic.replace("pago:nao", "pago:sim");
-  await channel.setTopic(newTopic);
+  await channel.setTopic(
+    buildTopic({
+      userId: info.userId,
+      tipo: info.tipo,
+      status: info.status || "aberto",
+      produto: info.produto,
+      preco: info.preco,
+      pago: "sim"
+    })
+  );
 
-  if (info.userId) {
+  if (info.userId && CLIENT_ROLE_ID) {
     const member = await guild.members.fetch(info.userId).catch(() => null);
-    if (member && CLIENT_ROLE_ID) {
+    if (member) {
       await member.roles.add(CLIENT_ROLE_ID).catch(console.error);
     }
   }
@@ -373,7 +420,7 @@ async function confirmPayment(interaction) {
 }
 
 async function cancelOrder(interaction) {
-  await interaction.deferUpdate();
+  await safeButtonAcknowledge(interaction);
 
   const embed = new EmbedBuilder()
     .setTitle("❌ Pedido cancelado")
@@ -387,11 +434,10 @@ async function cancelOrder(interaction) {
 }
 
 async function closeTicket(interaction) {
-  await interaction.deferUpdate();
+  await safeButtonAcknowledge(interaction);
 
   const { channel, guild } = interaction;
-  const topic = channel.topic || "";
-  const info = parseTopic(topic);
+  const info = parseTopic(channel.topic || "");
 
   if (info.status === "fechado") {
     return channel.send({
@@ -404,7 +450,17 @@ async function closeTicket(interaction) {
     });
   }
 
-  await channel.setTopic(topic.replace("status:aberto", "status:fechado"));
+  await channel.setTopic(
+    buildTopic({
+      userId: info.userId,
+      tipo: info.tipo,
+      status: "fechado",
+      produto: info.produto,
+      preco: info.preco,
+      pago: info.pago || "nao"
+    })
+  );
+
   await channel.setName(`fechado-${channel.name.replace(/^fechado-/, "")}`);
 
   await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
@@ -430,11 +486,10 @@ async function closeTicket(interaction) {
 }
 
 async function reopenTicket(interaction) {
-  await interaction.deferUpdate();
+  await safeButtonAcknowledge(interaction);
 
   const { channel } = interaction;
-  const topic = channel.topic || "";
-  const info = parseTopic(topic);
+  const info = parseTopic(channel.topic || "");
 
   if (info.status !== "fechado") {
     return channel.send({
@@ -458,7 +513,17 @@ async function reopenTicket(interaction) {
     });
   }
 
-  await channel.setTopic(topic.replace("status:fechado", "status:aberto"));
+  await channel.setTopic(
+    buildTopic({
+      userId: info.userId,
+      tipo: info.tipo,
+      status: "aberto",
+      produto: info.produto,
+      preco: info.preco,
+      pago: info.pago || "nao"
+    })
+  );
+
   await channel.setName(channel.name.replace(/^fechado-/, ""));
 
   await channel.permissionOverwrites.edit(info.userId, {
@@ -481,7 +546,7 @@ async function reopenTicket(interaction) {
 }
 
 async function deleteTicket(interaction) {
-  await interaction.deferUpdate();
+  await safeButtonAcknowledge(interaction);
 
   await interaction.channel.send("Este ticket será deletado em 5 segundos...");
 
@@ -551,7 +616,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         return interaction.reply({
           content: "Produto selecionado com sucesso.",
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
     }
@@ -567,15 +632,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
   } catch (error) {
     console.error("Erro na interação:", error);
 
-    if (!interaction.replied && !interaction.deferred) {
+    if (!interaction.deferred && !interaction.replied) {
       await interaction.reply({
         content: "Ocorreu um erro ao processar essa ação.",
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       }).catch(() => {});
     } else {
       await interaction.followUp({
         content: "Ocorreu um erro ao processar essa ação.",
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       }).catch(() => {});
     }
   }
