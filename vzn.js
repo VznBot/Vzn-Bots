@@ -21,7 +21,7 @@ app.listen(process.env.PORT || 3000, () => console.log("Servidor web ligado"));
 const TICKET_CATEGORY_ID = "1407113666029162498";
 const STAFF_ROLE_ID = "1407113665546817612";
 const PREFIX = "!";
-const PIX_CHAVE = "SUA_CHAVE_PIX_AQUI";
+const PIX_CHAVE = "victomiguel2013@gmail.com";
 
 const client = new Client({
   intents: [
