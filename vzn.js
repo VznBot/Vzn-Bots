@@ -14,32 +14,15 @@ const {
 } = require("discord.js");
 const express = require("express");
 
-// ===== Servidor web pro Railway/Render =====
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.get("/", (_, res) => res.send("Bot online"));
+app.listen(process.env.PORT || 3000, () => console.log("Servidor web ligado"));
 
-app.get("/", (req, res) => {
-  res.send("Bot online");
-});
-
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-});
-
-// ===== Configurações =====
-// Coloque aqui o ID da categoria onde os tickets serão criados
 const TICKET_CATEGORY_ID = "1407113666029162498";
-
-// Cargo que pode ver/gerenciar tickets além do dono
 const STAFF_ROLE_ID = "1407113665546817612";
-
-// Canal onde você vai mandar o painel
-const PAINEL_CANAL_ID = "1407113666029162500";
-
-// Prefixo opcional para comando de enviar painel
 const PREFIX = "!";
+const PIX_CHAVE = "SUA_CHAVE_PIX_AQUI";
 
-// ===== Cliente =====
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -48,27 +31,42 @@ const client = new Client({
   ]
 });
 
-// Guarda tickets em memória para evitar duplicados por usuário/tipo
-const openTickets = new Map();
+const ticketTypes = {
+  ticket_gamepass: {
+    nome: "Robux Via Gamepass",
+    prefixo: "gamepass",
+    emoji: "🛒",
+    descricao: "Abra um ticket para compra de Robux via gamepass"
+  },
+  ticket_gift: {
+    nome: "Robux Via Gift",
+    prefixo: "gift",
+    emoji: "🎁",
+    descricao: "Abra um ticket para compra de Robux via gift"
+  }
+};
 
-/**
- * Gera nome limpo para canal
- */
-function sanitizeName(name) {
-  return name
+const products = {
+  robux_100: { label: "100 Robux", value: "robux_100", preco: "R$ 6,50", numero: 100 },
+  robux_200: { label: "200 Robux", value: "robux_200", preco: "R$ 13,00", numero: 200 },
+  robux_300: { label: "300 Robux", value: "robux_300", preco: "R$ 19,50", numero: 300 },
+  robux_400: { label: "400 Robux", value: "robux_400", preco: "R$ 26,00", numero: 400 },
+  robux_500: { label: "500 Robux", value: "robux_500", preco: "R$ 32,50", numero: 500 },
+  robux_600: { label: "600 Robux", value: "robux_600", preco: "R$ 39,00", numero: 600 },
+  robux_1000: { label: "1000 Robux", value: "robux_1000", preco: "R$ 65,00", numero: 1000 }
+};
+
+const sanitizeName = (name) =>
+  name
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]/g, "-")
     .replace(/-+/g, "-")
     .slice(0, 20);
-}
 
-/**
- * Cria embed do painel
- */
-function createPainelEmbed() {
-  return new EmbedBuilder()
+const painelEmbed = () =>
+  new EmbedBuilder()
     .setTitle("🎫 Central de Tickets")
     .setDescription(
       [
@@ -80,51 +78,81 @@ function createPainelEmbed() {
       ].join("\n")
     )
     .setColor(0x5865f2);
-}
 
-/**
- * Cria menu do painel
- */
-function createPainelMenu() {
-  return new ActionRowBuilder().addComponents(
+const painelMenu = () =>
+  new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId("abrir_ticket_menu")
       .setPlaceholder("Selecione o tipo de ticket")
-      .addOptions([
-        {
-          label: "Robux Via Gamepass",
-          description: "Abra um ticket para compra de Robux via gamepass",
-          value: "ticket_gamepass",
-          emoji: "🛒"
-        },
-        {
-          label: "Robux Via Gift",
-          description: "Abra um ticket para compra de Robux via gift",
-          value: "ticket_gift",
-          emoji: "🎁"
-        }
-      ])
+      .addOptions(
+        Object.entries(ticketTypes).map(([value, item]) => ({
+          label: item.nome,
+          description: item.descricao,
+          value,
+          emoji: item.emoji
+        }))
+      )
   );
-}
 
-/**
- * Botões de ticket aberto
- */
-function createOpenTicketButtons() {
-  return new ActionRowBuilder().addComponents(
+const productMenu = (tipo) =>
+  new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`produto_${tipo}`)
+      .setPlaceholder("Selecione a quantidade de Robux")
+      .addOptions(
+        Object.values(products).map((p) => ({
+          label: p.label,
+          description: `Valor: ${p.preco}`,
+          value: p.value,
+          emoji: "💸"
+        }))
+      )
+  );
+
+const paymentButtons = () =>
+  new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("ja_paguei")
+      .setLabel("Já paguei")
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji("✅"),
+    new ButtonBuilder()
+      .setCustomId("cancelar_pedido")
+      .setLabel("Cancelar pedido")
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji("❌"),
     new ButtonBuilder()
       .setCustomId("fechar_ticket")
       .setLabel("Fechar Ticket")
       .setStyle(ButtonStyle.Danger)
       .setEmoji("🔒")
   );
-}
 
-/**
- * Botões de ticket fechado
- */
-function createClosedTicketButtons() {
-  return new ActionRowBuilder().addComponents(
+const staffButtons = () =>
+  new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("confirmar_pagamento")
+      .setLabel("Confirmar pagamento")
+      .setStyle(ButtonStyle.Success)
+      .setEmoji("💰"),
+    new ButtonBuilder()
+      .setCustomId("fechar_ticket")
+      .setLabel("Fechar Ticket")
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji("🔒")
+  );
+
+const openButtons = () =>
+  new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("fechar_ticket")
+      .setLabel("Fechar Ticket")
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji("🔒")
+  );
+
+const closedButtons = () =>
+  new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("reabrir_ticket")
       .setLabel("Reabrir Ticket")
@@ -136,35 +164,37 @@ function createClosedTicketButtons() {
       .setStyle(ButtonStyle.Secondary)
       .setEmoji("🗑️")
   );
-}
 
-/**
- * Verifica se usuário já tem ticket aberto do mesmo tipo
- */
-async function userAlreadyHasTicket(guild, userId, tipo) {
-  const expectedStart =
-    tipo === "ticket_gamepass" ? `gamepass-` : `gift-`;
-
+async function findOpenTicket(guild, userId, tipo) {
+  const prefixo = ticketTypes[tipo].prefixo;
   return guild.channels.cache.find(
     (c) =>
       c.parentId === TICKET_CATEGORY_ID &&
       c.type === ChannelType.GuildText &&
-      c.topic &&
-      c.topic.includes(`user:${userId}`) &&
-      c.topic.includes("status:aberto") &&
-      c.name.startsWith(expectedStart)
+      c.topic?.includes(`user:${userId}`) &&
+      c.topic?.includes(`tipo:${tipo}`) &&
+      c.topic?.includes("status:aberto") &&
+      c.name.startsWith(`${prefixo}-`)
   );
 }
 
-/**
- * Cria ticket
- */
-async function createTicket(interaction, tipo) {
-  const guild = interaction.guild;
-  const member = interaction.member;
-  const user = interaction.user;
+function parseTopic(topic = "") {
+  const get = (key) => topic.match(new RegExp(`${key}:([^|]+)`))?.[1]?.trim();
+  return {
+    userId: get("user"),
+    tipo: get("tipo"),
+    status: get("status"),
+    produto: get("produto"),
+    preco: get("preco"),
+    pago: get("pago")
+  };
+}
 
-  const existing = await userAlreadyHasTicket(guild, user.id, tipo);
+async function createTicket(interaction, tipo) {
+  const { guild, user } = interaction;
+  const config = ticketTypes[tipo];
+
+  const existing = await findOpenTicket(guild, user.id, tipo);
   if (existing) {
     return interaction.reply({
       content: `Você já possui um ticket aberto: ${existing}`,
@@ -172,25 +202,15 @@ async function createTicket(interaction, tipo) {
     });
   }
 
-  const tipoNome =
-    tipo === "ticket_gamepass" ? "Robux Via Gamepass" : "Robux Via Gift";
-
-  const prefixo =
-    tipo === "ticket_gamepass" ? "gamepass" : "gift";
-
-  const channelName = `${prefixo}-${sanitizeName(user.username)}`;
-
-  const ticketChannel = await guild.channels.create({
-    name: channelName,
+  const channel = await guild.channels.create({
+    name: `${config.prefixo}-${sanitizeName(user.username)}`,
     type: ChannelType.GuildText,
     parent: TICKET_CATEGORY_ID,
-    topic: `user:${user.id} | tipo:${tipo} | status:aberto`,
+    topic: `user:${user.id} | tipo:${tipo} | status:aberto | pago:nao`,
     permissionOverwrites: [
       {
         id: guild.roles.everyone.id,
-        deny: [
-          PermissionsBitField.Flags.ViewChannel
-        ]
+        deny: [PermissionsBitField.Flags.ViewChannel]
       },
       {
         id: user.id,
@@ -227,36 +247,131 @@ async function createTicket(interaction, tipo) {
   });
 
   const embed = new EmbedBuilder()
-    .setTitle("🎟️ Ticket Aberto")
+    .setTitle("🛍️ Pedido iniciado")
     .setDescription(
       [
         `Olá ${user}, seu ticket foi criado com sucesso.`,
         "",
-        `**Tipo:** ${tipoNome}`,
+        `**Tipo:** ${config.nome}`,
         "",
-        "Explique seu pedido com o máximo de detalhes possível.",
-        "A equipe irá responder em breve."
+        "Agora selecione abaixo a quantidade de Robux que você deseja comprar."
       ].join("\n")
     )
     .setColor(0x57f287);
 
-  await ticketChannel.send({
+  await channel.send({
     content: `${user} <@&${STAFF_ROLE_ID}>`,
     embeds: [embed],
-    components: [createOpenTicketButtons()]
+    components: [productMenu(tipo), openButtons()]
   });
 
   await interaction.reply({
-    content: `Seu ticket foi criado: ${ticketChannel}`,
+    content: `Seu ticket foi criado: ${channel}`,
     ephemeral: true
   });
 }
 
-/**
- * Fecha ticket
- */
+async function sendOrderSummary(channel, user, tipo, productKey) {
+  const ticket = ticketTypes[tipo];
+  const product = products[productKey];
+
+  const oldTopic = channel.topic || "";
+  const newTopic = `${oldTopic} | produto:${product.label} | preco:${product.preco}`;
+
+  await channel.setTopic(newTopic);
+
+  const embed = new EmbedBuilder()
+    .setTitle("🧾 Resumo do Pedido")
+    .setDescription(
+      [
+        `**Cliente:** ${user}`,
+        `**Produto:** ${product.label}`,
+        `**Método:** ${ticket.nome}`,
+        `**Valor:** ${product.preco}`,
+        `**Status:** Aguardando pagamento`,
+        "",
+        "**Pagamento via PIX**",
+        `Chave PIX: \`${PIX_CHAVE}\``,
+        "",
+        "Após pagar, clique em **Já paguei** e envie o comprovante no ticket."
+      ].join("\n")
+    )
+    .setColor(0xf1c40f);
+
+  await channel.send({
+    embeds: [embed],
+    components: [paymentButtons()]
+  });
+}
+
+async function markAsPaid(interaction) {
+  const { channel, user } = interaction;
+  const info = parseTopic(channel.topic);
+
+  const embed = new EmbedBuilder()
+    .setTitle("📨 Pagamento enviado")
+    .setDescription(
+      [
+        `${user} informou que já realizou o pagamento.`,
+        "",
+        "A equipe deve conferir o comprovante e clicar em **Confirmar pagamento**."
+      ].join("\n")
+    )
+    .setColor(0x3498db);
+
+  await interaction.reply({
+    embeds: [embed],
+    components: [staffButtons()]
+  });
+}
+
+async function confirmPayment(interaction) {
+  const { channel } = interaction;
+  const topic = channel.topic || "";
+
+  if (topic.includes("pago:sim")) {
+    return interaction.reply({
+      content: "Este pedido já foi confirmado como pago.",
+      ephemeral: true
+    });
+  }
+
+  await channel.setTopic(topic.replace("pago:nao", "pago:sim"));
+
+  const info = parseTopic(channel.topic);
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ Pagamento confirmado")
+    .setDescription(
+      [
+        `**Produto:** ${info.produto || "Não definido"}`,
+        `**Valor:** ${info.preco || "Não definido"}`,
+        "",
+        "Pagamento confirmado com sucesso.",
+        "Agora a equipe pode prosseguir com a entrega."
+      ].join("\n")
+    )
+    .setColor(0x2ecc71);
+
+  await interaction.reply({
+    embeds: [embed]
+  });
+}
+
+async function cancelOrder(interaction) {
+  const embed = new EmbedBuilder()
+    .setTitle("❌ Pedido cancelado")
+    .setDescription("Este pedido foi cancelado. Se desejar, abra um novo ticket.")
+    .setColor(0xe74c3c);
+
+  await interaction.reply({
+    embeds: [embed],
+    components: [openButtons()]
+  });
+}
+
 async function closeTicket(interaction) {
-  const channel = interaction.channel;
+  const { channel, guild } = interaction;
   const topic = channel.topic || "";
 
   if (!topic.includes("status:aberto")) {
@@ -266,39 +381,34 @@ async function closeTicket(interaction) {
     });
   }
 
-  const newTopic = topic.replace("status:aberto", "status:fechado");
+  const userId = topic.match(/user:(\d+)/)?.[1];
+  await channel.setTopic(topic.replace("status:aberto", "status:fechado"));
+  await channel.setName(`fechado-${channel.name.replace(/^fechado-/, "")}`);
 
-  await channel.permissionOverwrites.edit(interaction.guild.roles.everyone.id, {
+  await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
     ViewChannel: false
   });
 
-  const userIdMatch = topic.match(/user:(\d+)/);
-  if (userIdMatch) {
-    await channel.permissionOverwrites.edit(userIdMatch[1], {
+  if (userId) {
+    await channel.permissionOverwrites.edit(userId, {
       ViewChannel: false,
       SendMessages: false
     });
   }
 
-  await channel.setTopic(newTopic);
-  await channel.setName(`fechado-${channel.name.replace(/^fechado-/, "")}`);
-
-  const embed = new EmbedBuilder()
-    .setTitle("🔒 Ticket Fechado")
-    .setDescription("Este ticket foi fechado. Você pode reabrir ou deletar abaixo.")
-    .setColor(0xed4245);
-
   await interaction.update({
-    embeds: [embed],
-    components: [createClosedTicketButtons()]
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("🔒 Ticket Fechado")
+        .setDescription("Este ticket foi fechado. Você pode reabrir ou deletar abaixo.")
+        .setColor(0xed4245)
+    ],
+    components: [closedButtons()]
   });
 }
 
-/**
- * Reabre ticket
- */
 async function reopenTicket(interaction) {
-  const channel = interaction.channel;
+  const { channel } = interaction;
   const topic = channel.topic || "";
 
   if (!topic.includes("status:fechado")) {
@@ -308,17 +418,18 @@ async function reopenTicket(interaction) {
     });
   }
 
-  const userIdMatch = topic.match(/user:(\d+)/);
-  if (!userIdMatch) {
+  const userId = topic.match(/user:(\d+)/)?.[1];
+  if (!userId) {
     return interaction.reply({
       content: "Não foi possível identificar o dono do ticket.",
       ephemeral: true
     });
   }
 
-  const newTopic = topic.replace("status:fechado", "status:aberto");
+  await channel.setTopic(topic.replace("status:fechado", "status:aberto"));
+  await channel.setName(channel.name.replace(/^fechado-/, ""));
 
-  await channel.permissionOverwrites.edit(userIdMatch[1], {
+  await channel.permissionOverwrites.edit(userId, {
     ViewChannel: true,
     SendMessages: true,
     ReadMessageHistory: true,
@@ -326,47 +437,28 @@ async function reopenTicket(interaction) {
     EmbedLinks: true
   });
 
-  await channel.setTopic(newTopic);
-  await channel.setName(channel.name.replace(/^fechado-/, ""));
-
-  const embed = new EmbedBuilder()
-    .setTitle("🔓 Ticket Reaberto")
-    .setDescription("Este ticket foi reaberto com sucesso.")
-    .setColor(0x57f287);
-
   await interaction.update({
-    embeds: [embed],
-    components: [createOpenTicketButtons()]
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("🔓 Ticket Reaberto")
+        .setDescription("Este ticket foi reaberto com sucesso.")
+        .setColor(0x57f287)
+    ],
+    components: [openButtons()]
   });
 }
 
-/**
- * Deleta ticket
- */
 async function deleteTicket(interaction) {
-  await interaction.reply({
-    content: "Este ticket será deletado em 5 segundos...",
-    ephemeral: false
-  });
-
-  setTimeout(async () => {
-    try {
-      await interaction.channel.delete();
-    } catch (error) {
-      console.error("Erro ao deletar ticket:", error);
-    }
-  }, 5000);
+  await interaction.reply({ content: "Este ticket será deletado em 5 segundos..." });
+  setTimeout(() => interaction.channel.delete().catch(console.error), 5000);
 }
 
-// ===== Quando o bot ficar online =====
-client.once(Events.ClientReady, async (readyClient) => {
-  console.log(`Logado como ${readyClient.user.tag}`);
+client.once(Events.ClientReady, (bot) => {
+  console.log(`Logado como ${bot.user.tag}`);
 });
 
-// ===== Comando pra enviar o painel =====
 client.on(Events.MessageCreate, async (message) => {
-  if (message.author.bot) return;
-  if (!message.guild) return;
+  if (message.author.bot || !message.guild) return;
 
   if (message.content === `${PREFIX}painel`) {
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
@@ -374,53 +466,59 @@ client.on(Events.MessageCreate, async (message) => {
     }
 
     await message.channel.send({
-      embeds: [createPainelEmbed()],
-      components: [createPainelMenu()]
+      embeds: [painelEmbed()],
+      components: [painelMenu()]
     });
 
     await message.reply("Painel enviado com sucesso.");
   }
 });
 
-// ===== Interações =====
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isStringSelectMenu()) {
       if (interaction.customId === "abrir_ticket_menu") {
-        const tipo = interaction.values[0];
-        await createTicket(interaction, tipo);
+        return createTicket(interaction, interaction.values[0]);
+      }
+
+      if (interaction.customId.startsWith("produto_")) {
+        const tipo = interaction.customId.replace("produto_", "");
+        return sendOrderSummary(
+          interaction.channel,
+          interaction.user,
+          tipo,
+          interaction.values[0]
+        ).then(() =>
+          interaction.reply({
+            content: "Produto selecionado com sucesso.",
+            ephemeral: true
+          })
+        );
       }
     }
 
-    if (interaction.isButton()) {
-      if (interaction.customId === "fechar_ticket") {
-        await closeTicket(interaction);
-      }
+    if (!interaction.isButton()) return;
 
-      if (interaction.customId === "reabrir_ticket") {
-        await reopenTicket(interaction);
-      }
-
-      if (interaction.customId === "deletar_ticket") {
-        await deleteTicket(interaction);
-      }
-    }
+    if (interaction.customId === "ja_paguei") return markAsPaid(interaction);
+    if (interaction.customId === "confirmar_pagamento") return confirmPayment(interaction);
+    if (interaction.customId === "cancelar_pedido") return cancelOrder(interaction);
+    if (interaction.customId === "fechar_ticket") return closeTicket(interaction);
+    if (interaction.customId === "reabrir_ticket") return reopenTicket(interaction);
+    if (interaction.customId === "deletar_ticket") return deleteTicket(interaction);
   } catch (error) {
     console.error("Erro na interação:", error);
 
+    const payload = {
+      content: "Ocorreu um erro ao processar essa ação.",
+      ephemeral: true
+    };
+
     if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        content: "Ocorreu um erro ao processar essa ação.",
-        ephemeral: true
-      });
+      await interaction.followUp(payload);
     } else {
-      await interaction.reply({
-        content: "Ocorreu um erro ao processar essa ação.",
-        ephemeral: true
-      });
+      await interaction.reply(payload);
     }
   }
 });
 
-// ===== Login =====
 client.login(process.env.TOKEN);
