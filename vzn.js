@@ -20,8 +20,10 @@ app.listen(process.env.PORT || 3000, () => console.log("Servidor web ligado"));
 
 const TICKET_CATEGORY_ID = "1407113666029162498";
 const STAFF_ROLE_ID = "1407113665546817612";
+const CLIENT_ROLE_ID = "1407113665555071047";
 const PREFIX = "!";
-const PIX_CHAVE = "victomiguel2013@gmail.com";
+
+let PIX_CHAVE = process.env.PIX_CHAVE || "victomiguel2013@gmail.com";
 
 const client = new Client({
   intents: [
@@ -47,13 +49,13 @@ const ticketTypes = {
 };
 
 const products = {
-  robux_100: { label: "100 Robux", value: "robux_100", preco: "R$ 6,50", numero: 100 },
-  robux_200: { label: "200 Robux", value: "robux_200", preco: "R$ 13,00", numero: 200 },
-  robux_300: { label: "300 Robux", value: "robux_300", preco: "R$ 19,50", numero: 300 },
-  robux_400: { label: "400 Robux", value: "robux_400", preco: "R$ 26,00", numero: 400 },
-  robux_500: { label: "500 Robux", value: "robux_500", preco: "R$ 32,50", numero: 500 },
-  robux_600: { label: "600 Robux", value: "robux_600", preco: "R$ 39,00", numero: 600 },
-  robux_1000: { label: "1000 Robux", value: "robux_1000", preco: "R$ 65,00", numero: 1000 }
+  robux_100: { label: "100 Robux", value: "robux_100", preco: "R$ 6,50" },
+  robux_200: { label: "200 Robux", value: "robux_200", preco: "R$ 13,00" },
+  robux_300: { label: "300 Robux", value: "robux_300", preco: "R$ 19,50" },
+  robux_400: { label: "400 Robux", value: "robux_400", preco: "R$ 26,00" },
+  robux_500: { label: "500 Robux", value: "robux_500", preco: "R$ 32,50" },
+  robux_600: { label: "600 Robux", value: "robux_600", preco: "R$ 39,00" },
+  robux_1000: { label: "1000 Robux", value: "robux_1000", preco: "R$ 65,00" }
 };
 
 const sanitizeName = (name) =>
@@ -165,6 +167,18 @@ const closedButtons = () =>
       .setEmoji("🗑️")
   );
 
+function parseTopic(topic = "") {
+  const get = (key) => topic.match(new RegExp(`${key}:([^|]+)`))?.[1]?.trim();
+  return {
+    userId: get("user"),
+    tipo: get("tipo"),
+    status: get("status"),
+    produto: get("produto"),
+    preco: get("preco"),
+    pago: get("pago")
+  };
+}
+
 async function findOpenTicket(guild, userId, tipo) {
   const prefixo = ticketTypes[tipo].prefixo;
   return guild.channels.cache.find(
@@ -176,18 +190,6 @@ async function findOpenTicket(guild, userId, tipo) {
       c.topic?.includes("status:aberto") &&
       c.name.startsWith(`${prefixo}-`)
   );
-}
-
-function parseTopic(topic = "") {
-  const get = (key) => topic.match(new RegExp(`${key}:([^|]+)`))?.[1]?.trim();
-  return {
-    userId: get("user"),
-    tipo: get("tipo"),
-    status: get("status"),
-    produto: get("produto"),
-    preco: get("preco"),
-    pago: get("pago")
-  };
 }
 
 async function createTicket(interaction, tipo) {
@@ -274,10 +276,9 @@ async function createTicket(interaction, tipo) {
 async function sendOrderSummary(channel, user, tipo, productKey) {
   const ticket = ticketTypes[tipo];
   const product = products[productKey];
+  const info = parseTopic(channel.topic || "");
 
-  const oldTopic = channel.topic || "";
-  const newTopic = `${oldTopic} | produto:${product.label} | preco:${product.preco}`;
-
+  let newTopic = `user:${info.userId} | tipo:${tipo} | status:${info.status || "aberto"} | produto:${product.label} | preco:${product.preco} | pago:${info.pago || "nao"}`;
   await channel.setTopic(newTopic);
 
   const embed = new EmbedBuilder()
@@ -305,14 +306,11 @@ async function sendOrderSummary(channel, user, tipo, productKey) {
 }
 
 async function markAsPaid(interaction) {
-  const { channel, user } = interaction;
-  const info = parseTopic(channel.topic);
-
   const embed = new EmbedBuilder()
     .setTitle("📨 Pagamento enviado")
     .setDescription(
       [
-        `${user} informou que já realizou o pagamento.`,
+        `${interaction.user} informou que já realizou o pagamento.`,
         "",
         "A equipe deve conferir o comprovante e clicar em **Confirmar pagamento**."
       ].join("\n")
@@ -326,7 +324,7 @@ async function markAsPaid(interaction) {
 }
 
 async function confirmPayment(interaction) {
-  const { channel } = interaction;
+  const { channel, guild } = interaction;
   const topic = channel.topic || "";
 
   if (topic.includes("pago:sim")) {
@@ -336,9 +334,16 @@ async function confirmPayment(interaction) {
     });
   }
 
-  await channel.setTopic(topic.replace("pago:nao", "pago:sim"));
+  const info = parseTopic(topic);
+  const newTopic = topic.replace("pago:nao", "pago:sim");
+  await channel.setTopic(newTopic);
 
-  const info = parseTopic(channel.topic);
+  if (CLIENT_ROLE_ID !== "COLOQUE_AQUI_O_ID_DO_CARGO_CLIENTE" && info.userId) {
+    const member = await guild.members.fetch(info.userId).catch(() => null);
+    if (member) {
+      await member.roles.add(CLIENT_ROLE_ID).catch(console.error);
+    }
+  }
 
   const embed = new EmbedBuilder()
     .setTitle("✅ Pagamento confirmado")
@@ -348,14 +353,15 @@ async function confirmPayment(interaction) {
         `**Valor:** ${info.preco || "Não definido"}`,
         "",
         "Pagamento confirmado com sucesso.",
-        "Agora a equipe pode prosseguir com a entrega."
+        "Agora a equipe pode prosseguir com a entrega.",
+        CLIENT_ROLE_ID !== "COLOQUE_AQUI_O_ID_DO_CARGO_CLIENTE"
+          ? "O cargo de cliente foi adicionado automaticamente."
+          : "Defina o ID do cargo de cliente para ativar o cargo automático."
       ].join("\n")
     )
     .setColor(0x2ecc71);
 
-  await interaction.reply({
-    embeds: [embed]
-  });
+  await interaction.reply({ embeds: [embed] });
 }
 
 async function cancelOrder(interaction) {
@@ -396,7 +402,7 @@ async function closeTicket(interaction) {
     });
   }
 
-  await interaction.update({
+  await interaction.reply({
     embeds: [
       new EmbedBuilder()
         .setTitle("🔒 Ticket Fechado")
@@ -437,7 +443,7 @@ async function reopenTicket(interaction) {
     EmbedLinks: true
   });
 
-  await interaction.update({
+  await interaction.reply({
     embeds: [
       new EmbedBuilder()
         .setTitle("🔓 Ticket Reaberto")
@@ -449,8 +455,13 @@ async function reopenTicket(interaction) {
 }
 
 async function deleteTicket(interaction) {
-  await interaction.reply({ content: "Este ticket será deletado em 5 segundos..." });
-  setTimeout(() => interaction.channel.delete().catch(console.error), 5000);
+  await interaction.reply({
+    content: "Este ticket será deletado em 5 segundos..."
+  });
+
+  setTimeout(() => {
+    interaction.channel.delete().catch(console.error);
+  }, 5000);
 }
 
 client.once(Events.ClientReady, (bot) => {
@@ -470,7 +481,29 @@ client.on(Events.MessageCreate, async (message) => {
       components: [painelMenu()]
     });
 
-    await message.reply("Painel enviado com sucesso.");
+    return message.reply("Painel enviado com sucesso.");
+  }
+
+  if (message.content.startsWith(`${PREFIX}configpix `)) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      return message.reply("Você precisa ser administrador para usar este comando.");
+    }
+
+    const novaChave = message.content.slice(`${PREFIX}configpix `.length).trim();
+    if (!novaChave) {
+      return message.reply(`Use assim: ${PREFIX}configpix sua_chave_pix`);
+    }
+
+    PIX_CHAVE = novaChave;
+    return message.reply("Chave PIX atualizada com sucesso.");
+  }
+
+  if (message.content === `${PREFIX}verpix`) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      return message.reply("Você precisa ser administrador para usar este comando.");
+    }
+
+    return message.reply(`Chave PIX atual: \`${PIX_CHAVE}\``);
   }
 });
 
@@ -483,17 +516,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (interaction.customId.startsWith("produto_")) {
         const tipo = interaction.customId.replace("produto_", "");
-        return sendOrderSummary(
+        await sendOrderSummary(
           interaction.channel,
           interaction.user,
           tipo,
           interaction.values[0]
-        ).then(() =>
-          interaction.reply({
-            content: "Produto selecionado com sucesso.",
-            ephemeral: true
-          })
         );
+
+        return interaction.reply({
+          content: "Produto selecionado com sucesso.",
+          ephemeral: true
+        });
       }
     }
 
@@ -514,9 +547,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     };
 
     if (interaction.replied || interaction.deferred) {
-      await interaction.followUp(payload);
+      await interaction.followUp(payload).catch(() => {});
     } else {
-      await interaction.reply(payload);
+      await interaction.reply(payload).catch(() => {});
     }
   }
 });
