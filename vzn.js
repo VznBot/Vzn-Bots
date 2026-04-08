@@ -16,8 +16,12 @@ const {
 const express = require("express");
 
 const app = express();
+app.use(express.json());
+
 app.get("/", (_, res) => res.send("Bot online"));
-app.listen(process.env.PORT || 3000, () => console.log("Servidor web ligado"));
+app.listen(process.env.PORT || 3000, () => {
+  console.log("Servidor web ligado");
+});
 
 const TICKET_CATEGORY_ID = "1407113666029162498";
 const STAFF_ROLE_ID = "1407113665546817612";
@@ -40,12 +44,6 @@ const ticketTypes = {
     prefixo: "gamepass",
     emoji: "🛒",
     descricao: "Abra um ticket para compra de Robux via gamepass"
-  },
-  ticket_gift: {
-    nome: "Robux Via Gift",
-    prefixo: "gift",
-    emoji: "🎁",
-    descricao: "Abra um ticket para compra de Robux via gift"
   }
 };
 
@@ -66,6 +64,7 @@ const sanitizeName = (name) =>
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]/g, "-")
     .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
     .slice(0, 20);
 
 const parseTopic = (topic = "") => {
@@ -100,6 +99,15 @@ const buildTopic = ({
   return parts.join(" | ");
 };
 
+const isStaff = (member) =>
+  member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+  member.roles.cache.has(STAFF_ROLE_ID);
+
+const isTicketChannel = (channel) =>
+  channel &&
+  channel.type === ChannelType.GuildText &&
+  channel.parentId === TICKET_CATEGORY_ID;
+
 const painelEmbed = () =>
   new EmbedBuilder()
     .setTitle("🎫 Central de Tickets")
@@ -107,9 +115,8 @@ const painelEmbed = () =>
       [
         "Selecione abaixo o tipo de atendimento que você deseja abrir.",
         "",
-        "**Opções disponíveis:**",
-        "🛒 **Robux Via Gamepass**",
-        "🎁 **Robux Via Gift**"
+        "**Opção disponível:**",
+        "🛒 **Robux Via Gamepass**"
       ].join("\n")
     )
     .setColor(0x5865f2);
@@ -207,7 +214,9 @@ async function safeButtonAcknowledge(interaction) {
 }
 
 async function findOpenTicket(guild, userId, tipo) {
-  const prefixo = ticketTypes[tipo].prefixo;
+  const config = ticketTypes[tipo];
+  if (!config) return null;
+
   return guild.channels.cache.find(
     (c) =>
       c.parentId === TICKET_CATEGORY_ID &&
@@ -215,13 +224,20 @@ async function findOpenTicket(guild, userId, tipo) {
       c.topic?.includes(`user:${userId}`) &&
       c.topic?.includes(`tipo:${tipo}`) &&
       c.topic?.includes("status:aberto") &&
-      c.name.startsWith(`${prefixo}-`)
+      c.name.startsWith(`${config.prefixo}-`)
   );
 }
 
 async function createTicket(interaction, tipo) {
   const { guild, user } = interaction;
   const config = ticketTypes[tipo];
+
+  if (!config) {
+    return interaction.reply({
+      content: "Tipo de ticket inválido.",
+      flags: MessageFlags.Ephemeral
+    });
+  }
 
   const existing = await findOpenTicket(guild, user.id, tipo);
   if (existing) {
@@ -232,7 +248,7 @@ async function createTicket(interaction, tipo) {
   }
 
   const channel = await guild.channels.create({
-    name: `${config.prefixo}-${sanitizeName(user.username)}`,
+    name: `${config.prefixo}-${sanitizeName(user.username) || "cliente"}`,
     type: ChannelType.GuildText,
     parent: TICKET_CATEGORY_ID,
     topic: buildTopic({
@@ -274,7 +290,9 @@ async function createTicket(interaction, tipo) {
           PermissionsBitField.Flags.SendMessages,
           PermissionsBitField.Flags.ReadMessageHistory,
           PermissionsBitField.Flags.ManageChannels,
-          PermissionsBitField.Flags.ManageMessages
+          PermissionsBitField.Flags.ManageMessages,
+          PermissionsBitField.Flags.AttachFiles,
+          PermissionsBitField.Flags.EmbedLinks
         ]
       }
     ]
@@ -306,8 +324,15 @@ async function createTicket(interaction, tipo) {
 }
 
 async function sendOrderSummary(channel, user, tipo, productKey) {
+  if (!isTicketChannel(channel)) return;
+
   const ticket = ticketTypes[tipo];
   const product = products[productKey];
+
+  if (!ticket || !product) {
+    throw new Error("Tipo de ticket ou produto inválido.");
+  }
+
   const info = parseTopic(channel.topic || "");
 
   await channel.setTopic(
@@ -348,6 +373,16 @@ async function sendOrderSummary(channel, user, tipo, productKey) {
 async function markAsPaid(interaction) {
   await safeButtonAcknowledge(interaction);
 
+  if (!isTicketChannel(interaction.channel)) return;
+
+  const info = parseTopic(interaction.channel.topic || "");
+  if (!info.produto || !info.preco) {
+    return interaction.followUp({
+      content: "Selecione um produto antes de informar o pagamento.",
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
   const embed = new EmbedBuilder()
     .setTitle("📨 Pagamento enviado")
     .setDescription(
@@ -368,7 +403,17 @@ async function markAsPaid(interaction) {
 async function confirmPayment(interaction) {
   await safeButtonAcknowledge(interaction);
 
-  const { channel, guild } = interaction;
+  const { channel, guild, member } = interaction;
+
+  if (!isTicketChannel(channel)) return;
+
+  if (!isStaff(member)) {
+    return interaction.followUp({
+      content: "Apenas a equipe pode confirmar pagamentos.",
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
   const info = parseTopic(channel.topic || "");
 
   if (info.pago === "sim") {
@@ -394,9 +439,9 @@ async function confirmPayment(interaction) {
   );
 
   if (info.userId && CLIENT_ROLE_ID) {
-    const member = await guild.members.fetch(info.userId).catch(() => null);
-    if (member) {
-      await member.roles.add(CLIENT_ROLE_ID).catch(console.error);
+    const ticketMember = await guild.members.fetch(info.userId).catch(() => null);
+    if (ticketMember) {
+      await ticketMember.roles.add(CLIENT_ROLE_ID).catch(console.error);
     }
   }
 
@@ -422,6 +467,8 @@ async function confirmPayment(interaction) {
 async function cancelOrder(interaction) {
   await safeButtonAcknowledge(interaction);
 
+  if (!isTicketChannel(interaction.channel)) return;
+
   const embed = new EmbedBuilder()
     .setTitle("❌ Pedido cancelado")
     .setDescription("Este pedido foi cancelado. Se desejar, abra um novo ticket.")
@@ -436,8 +483,19 @@ async function cancelOrder(interaction) {
 async function closeTicket(interaction) {
   await safeButtonAcknowledge(interaction);
 
-  const { channel, guild } = interaction;
+  const { channel, guild, member, user } = interaction;
+
+  if (!isTicketChannel(channel)) return;
+
   const info = parseTopic(channel.topic || "");
+  const donoDoTicket = info.userId === user.id;
+
+  if (!donoDoTicket && !isStaff(member)) {
+    return interaction.followUp({
+      content: "Você não tem permissão para fechar este ticket.",
+      flags: MessageFlags.Ephemeral
+    });
+  }
 
   if (info.status === "fechado") {
     return channel.send({
@@ -488,7 +546,17 @@ async function closeTicket(interaction) {
 async function reopenTicket(interaction) {
   await safeButtonAcknowledge(interaction);
 
-  const { channel } = interaction;
+  const { channel, member } = interaction;
+
+  if (!isTicketChannel(channel)) return;
+
+  if (!isStaff(member)) {
+    return interaction.followUp({
+      content: "Apenas a equipe pode reabrir tickets.",
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
   const info = parseTopic(channel.topic || "");
 
   if (info.status !== "fechado") {
@@ -548,6 +616,15 @@ async function reopenTicket(interaction) {
 async function deleteTicket(interaction) {
   await safeButtonAcknowledge(interaction);
 
+  if (!isTicketChannel(interaction.channel)) return;
+
+  if (!isStaff(interaction.member)) {
+    return interaction.followUp({
+      content: "Apenas a equipe pode deletar tickets.",
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
   await interaction.channel.send("Este ticket será deletado em 5 segundos...");
 
   setTimeout(() => {
@@ -606,7 +683,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       if (interaction.customId.startsWith("produto_")) {
+        if (!isTicketChannel(interaction.channel)) {
+          return interaction.reply({
+            content: "Esse menu só pode ser usado dentro de um ticket.",
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
         const tipo = interaction.customId.replace("produto_", "");
+
         await sendOrderSummary(
           interaction.channel,
           interaction.user,
@@ -622,6 +707,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (!interaction.isButton()) return;
+
+    if (!isTicketChannel(interaction.channel)) {
+      return interaction.reply({
+        content: "Este botão só pode ser usado em tickets.",
+        flags: MessageFlags.Ephemeral
+      });
+    }
 
     if (interaction.customId === "ja_paguei") return markAsPaid(interaction);
     if (interaction.customId === "confirmar_pagamento") return confirmPayment(interaction);
